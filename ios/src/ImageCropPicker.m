@@ -464,7 +464,7 @@ RCT_EXPORT_METHOD(openCropper:(NSDictionary *)options
 - (void) getVideoAsset:(PHAsset*)forAsset completion:(void (^)(NSDictionary* image))completion {
     PHImageManager *manager = [PHImageManager defaultManager];
     PHVideoRequestOptions *options = [[PHVideoRequestOptions alloc] init];
-    options.version = PHVideoRequestOptionsVersionOriginal;
+    options.version = PHVideoRequestOptionsVersionCurrent;
     options.networkAccessAllowed = YES;
     options.deliveryMode = PHVideoRequestOptionsDeliveryModeHighQualityFormat;
     
@@ -521,8 +521,7 @@ RCT_EXPORT_METHOD(openCropper:(NSDictionary *)options
     return @"";
 }
 
-- (void)qb_imagePickerController:
-(QBImagePickerController *)imagePickerController
+- (void)qb_imagePickerController:(QBImagePickerController *)imagePickerController
           didFinishPickingAssets:(NSArray *)assets {
     
     PHImageManager *manager = [PHImageManager defaultManager];
@@ -531,14 +530,19 @@ RCT_EXPORT_METHOD(openCropper:(NSDictionary *)options
     options.networkAccessAllowed = YES;
     
     if ([[[self options] objectForKey:@"multiple"] boolValue]) {
-        NSMutableArray *selections = [[NSMutableArray alloc] init];
+        NSMutableArray *selections = [NSMutableArray arrayWithCapacity:assets.count];
         
+        for (int i = 0; i < assets.count; i++) {
+            [selections addObject:[NSNull null]];
+        }
+
         [self showActivityIndicator:^(UIActivityIndicatorView *indicatorView, UIView *overlayView) {
             NSLock *lock = [[NSLock alloc] init];
             __block int processed = 0;
-            
-            for (PHAsset *phAsset in assets) {
-                
+
+            for (int index = 0; index < assets.count; index++) {
+                PHAsset *phAsset = assets[index];
+
                 if (phAsset.mediaType == PHAssetMediaTypeVideo) {
                     [self getVideoAsset:phAsset completion:^(NSDictionary* video) {
                         dispatch_async(dispatch_get_main_queue(), ^{
@@ -553,7 +557,7 @@ RCT_EXPORT_METHOD(openCropper:(NSDictionary *)options
                                 return;
                             }
                             
-                            [selections addObject:video];
+                            [selections replaceObjectAtIndex:index withObject:video];
                             processed++;
                             [lock unlock];
                             
@@ -626,22 +630,22 @@ RCT_EXPORT_METHOD(openCropper:(NSDictionary *)options
                                     if([[self.options objectForKey:@"includeExif"] boolValue]) {
                                         exif = [[CIImage imageWithData:imageData] properties];
                                     }
-                                    
-                                    [selections addObject:[self createAttachmentResponse:filePath
-                                                                                withExif: exif
-                                                                           withSourceURL:[sourceURL absoluteString]
-                                                                     withLocalIdentifier: phAsset.localIdentifier
-                                                                            withFilename: [phAsset valueForKey:@"filename"]
-                                                                               withWidth:imageResult.width
-                                                                              withHeight:imageResult.height
-                                                                                withMime:imageResult.mime
-                                                                                withSize:[NSNumber numberWithUnsignedInteger:imageResult.data.length]
-                                                                            withDuration: nil
-                                                                                withData:[[self.options objectForKey:@"includeBase64"] boolValue] ? [imageResult.data base64EncodedStringWithOptions:0]: nil
-                                                                                withRect:CGRectNull
-                                                                        withCreationDate:phAsset.creationDate
-                                                                    withModificationDate:phAsset.modificationDate
-                                                           ]];
+
+                                    [selections replaceObjectAtIndex:index withObject:[self createAttachmentResponse:filePath
+                                                                                                            withExif: exif
+                                                                                                       withSourceURL:[sourceURL absoluteString]
+                                                                                                 withLocalIdentifier: phAsset.localIdentifier
+                                                                                                        withFilename: [phAsset valueForKey:@"filename"]
+                                                                                                           withWidth:imageResult.width
+                                                                                                          withHeight:imageResult.height
+                                                                                                            withMime:imageResult.mime
+                                                                                                            withSize:[NSNumber numberWithUnsignedInteger:imageResult.data.length]
+                                                                                                        withDuration: nil
+                                                                                                            withData:[[self.options objectForKey:@"includeBase64"] boolValue] ? [imageResult.data base64EncodedStringWithOptions:0]: nil
+                                                                                                            withRect:CGRectNull
+                                                                                                    withCreationDate:phAsset.creationDate
+                                                                                                withModificationDate:phAsset.modificationDate
+                                                                                      ]];
                                 }
                                 processed++;
                                 [lock unlock];
@@ -866,6 +870,15 @@ RCT_EXPORT_METHOD(openCropper:(NSDictionary *)options
     };
 }
 
+// Assumes input like "#00FF00" (#RRGGBB).
++ (UIColor *)colorFromHexString:(NSString *)hexString {
+    unsigned rgbValue = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:hexString];
+    [scanner setScanLocation:1]; // bypass '#' character
+    [scanner scanHexInt:&rgbValue];
+    return [UIColor colorWithRed:((rgbValue & 0xFF0000) >> 16)/255.0 green:((rgbValue & 0xFF00) >> 8)/255.0 blue:(rgbValue & 0xFF)/255.0 alpha:1.0];
+}
+
 #pragma mark - TOCCropViewController Implementation
 - (void)cropImage:(UIImage *)image {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -887,6 +900,16 @@ RCT_EXPORT_METHOD(openCropper:(NSDictionary *)options
         
         cropVC.title = [[self options] objectForKey:@"cropperToolbarTitle"];
         cropVC.delegate = self;
+
+        NSString* rawDoneButtonColor = [self.options objectForKey:@"cropperChooseColor"];
+        NSString* rawCancelButtonColor = [self.options objectForKey:@"cropperCancelColor"];
+
+        if (rawDoneButtonColor) {
+            cropVC.doneButtonColor = [ImageCropPicker colorFromHexString: rawDoneButtonColor];
+        }
+        if (rawCancelButtonColor) {
+            cropVC.cancelButtonColor = [ImageCropPicker colorFromHexString: rawCancelButtonColor];
+        }
         
         cropVC.doneButtonTitle = [self.options objectForKey:@"cropperChooseText"];
         cropVC.cancelButtonTitle = [self.options objectForKey:@"cropperCancelText"];
